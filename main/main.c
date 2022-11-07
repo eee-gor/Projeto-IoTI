@@ -2,6 +2,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
 #include <esp_log.h>
 #include <esp_system.h>
 #include <math.h>
@@ -18,14 +19,15 @@
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y)) // função calulo Valor MINIMO
 
 float calcRMS(float *, int); // Função valor RMS
+int64_t TEMPO_0 = 0;         // Tempo_0 será para o timer
 
 DeviceAddress tempSensors[2];
 
 void app_main(void)
 {
-    int ON = 1; // variavel que muda de estado quando botao PAGE é pressionado
-    int cont = 0;
-    int i = 0;
+    int ON = 1;   // variavel que muda de estado quando botao PAGE é pressionado
+    int cont = 0; // contador
+    int i = 0;    // contador
 
     float Temperatura[100];                    // Temperatura é o valor da temperatura obtido no sensor
     float TemperaturaMAX = ds18b20_get_temp(); // TemperaturaMAX é o valor máximo da temperatura obtido no sensor
@@ -62,9 +64,26 @@ void app_main(void)
 
     Temperatura[cont] = ds18b20_get_temp();
     TemperaturaMIN = ds18b20_get_temp();
+    int64_t TEMPO_1 = esp_timer_get_time(); // TEMPO_1 será o valor do timer, que pega o tempo desde o ESP ligar
 
     while (1) // O que fica aqui, entra em loop
     {
+
+        // não usar delaytask para nao parar o codigo todo
+        if ((TEMPO_1 - TEMPO_0) >= 500000) // blink without delay para pegar os valores da temperatura a cada 0.5s, sem parar o codigo
+        {
+            Temperatura[cont] = ds18b20_get_temp();
+            TemperaturaMAX = MAX(Temperatura[cont], TemperaturaMAX); // Temperatura maxima é o valor retornado da função MAX
+            TemperaturaMIN = MIN(Temperatura[cont], TemperaturaMIN); // Temperatura minima é o valor retornado da função MIN
+            sprintf(temperatura, "     %.2f C", Temperatura[cont]);  // printf pa salvar o valor da temperatura no char
+            sprintf(temperaturaMAX, "MAX  %.2f C", TemperaturaMAX);  // printf pa salvar o valor da temperaturaMAX no char
+            sprintf(temperaturaMIN, "MIN  %.2f C", TemperaturaMIN);  // printf pa salvar o valor da temperaturaMIN no char
+            sprintf(charRMS, "RMS  %.2f", calcRMS(Temperatura, cont));
+
+            TEMPO_0 = TEMPO_1;
+            TEMPO_1 = esp_timer_get_time(); // TEMPO_1 será o valor do timer, que pega o tempo desde o ESP ligar
+        }
+
         if (gpio_get_level(RESET_PIN) == 1) // Se o botao de reset for pressionado, zera os valores de MAX e MIN
         {
             TemperaturaMAX = ds18b20_get_temp();
@@ -78,15 +97,6 @@ void app_main(void)
             ON = !ON;                          // muda estado de ON
             ssd1306_clear_screen(&dev, false); // Clear do display.
         }
-
-        Temperatura[cont] = ds18b20_get_temp();
-        TemperaturaMAX = MAX(Temperatura[cont], TemperaturaMAX); // Temperatura maxima é o valor retornado da função MAX
-        TemperaturaMIN = MIN(Temperatura[cont], TemperaturaMIN); // Temperatura minima é o valor retornado da função MIN
-
-        sprintf(temperatura, "     %.2f C", Temperatura[cont]); // printf pa salvar o valor da temperatura no char
-        sprintf(temperaturaMAX, "MAX  %.2f C", TemperaturaMAX); // printf pa salvar o valor da temperaturaMAX no char
-        sprintf(temperaturaMIN, "MIN  %.2f C", TemperaturaMIN); // printf pa salvar o valor da temperaturaMIN no char
-        sprintf(charRMS, "RMS  %.2f", calcRMS(Temperatura, cont));
 
         sprintf(char_AcelX, "Eixo X  %.2fm/s", AcelX); // printf pa salvar o valor da aceleração do eixo X no char
         sprintf(char_AcelY, "Eixo Y  %.2fm/s", AcelY); // printf pa salvar o valor da aceleração do eixo Y no char
@@ -118,20 +128,20 @@ void app_main(void)
             //}
             cont = 1;
         }
-
+        /*printf("TEMPO: %lli\n", esp_timer_get_time());
         printf("cont: %i\n", cont);                                // aqui exibe a temperatura no terminal, só pra testes
         printf("TemperaturaATUAL: %0.2f C\n", ds18b20_get_temp()); // aqui exibe a temperatura no terminal, só pra testes
         printf("TemperaturaMAX: %0.2f C\n", TemperaturaMAX);       // aqui exibe a temperatura no terminal, só pra testes
         printf("TemperaturaMIN: %0.2f C\n", TemperaturaMIN);       // aqui exibe a temperatura no terminal, só pra testes
-        vTaskDelay(50);                                            // delay de 500ms
-
+        // vTaskDelay(50);                                            // delay de 500ms
+        */
         cont++;
     }
 }
 
 float calcRMS(float *Temperatura, int cont)
-{ // Renomear valores10s pelo vetor
-    float rms, soma = 0, quantidade = 20;
+{
+    float rms, soma = 0;
     int i;
 
     for (i = 0; i < cont; i++)
