@@ -1,153 +1,196 @@
 #include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_timer.h"
 
-#include <math.h>
+#include "maintask.h"
 
-#include "mpu6050.h"
-#include "ds18b20.h"
-#include "ssd1306.h"
+float Temperatura[100];  // Temperatura é o valor da temperatura obtido no sensor
+float TemperaturaMAX;    // TemperaturaMAX é o valor máximo da temperatura obtido no sensor
+float TemperaturaMIN;    // TemperaturaMIN é o valor mínimo da temperatura obtido no sensor
+char temperatura[16];    // char temperatura (o display so le char)
+char temperaturaMAX[16]; // char da temperatura MAX
+char temperaturaMIN[16]; // char da temperatura MIN
+char charRMS[16];
+short accel_x;
+short accel_y;
+short accel_z;
+char char_AcelX[17]; // char aceleração eixo X
+char char_AcelY[17]; // char aceleração eixo Y
+char char_AcelZ[17]; // char aceleração eixo Z
 
-#define PAGINA_PIN 2                        // botao de mudar pagina está no GPI O2
-#define RESET_PIN 4                         // botao de reset está no GPI O4
-#define TEMP_PIN 23                         // Sensor de temperatua está no GPIO 23
-#define MAX(X, Y) (((X) > (Y)) ? (X) : (Y)) // função calulo Valor MAXIMO
-#define MIN(X, Y) (((X) < (Y)) ? (X) : (Y)) // função calulo Valor MINIMO
+int cont = 0; // contador
 
-float calcRMS(float *, int); // Função valor RMS
-int64_t TEMPO_0 = 0;         // Tempo_0 será para o timer
+static bool ON = 1; // variavel que muda de estado quando botao PAGE é pressionado
+SSD1306_t dev;      // address of the SSD1306_t structure
 
-DeviceAddress tempSensors[2];
+xQueueHandle interruptQueueRESET;
+xQueueHandle interruptQueuePAGINA;
 
-void app_main(void)
+void Display(void) // Função que inicia o Display
 {
-    int ON = 1;   // variavel que muda de estado quando botao PAGE é pressionado
-    int cont = 0; // contador
-    int i = 0;    // contador
-
-    float Temperatura[100];                    // Temperatura é o valor da temperatura obtido no sensor
-    float TemperaturaMAX = ds18b20_get_temp(); // TemperaturaMAX é o valor máximo da temperatura obtido no sensor
-    float TemperaturaMIN;                      // TemperaturaMIN é o valor mínimo da temperatura obtido no sensor
-    char temperatura[13];                      // char temperatura (o display so le char)
-    char temperaturaMAX[13];                   // char da temperatura MAX
-    char temperaturaMIN[13];                   // char da temperatura MIN
-    char charRMS[14];
-
-    float AcelX = 1;     // AcelX é o valor do acelerometo no eixo X obtido no sensor (valor teste)
-    float AcelY = 2;     // AcelY é o valor do acelerometo no eixo Y obtido no sensor (valor teste)
-    float AcelZ = 3;     // AcelZ é o valor do acelerometo no eixo Z obtido no sensor (valor teste)
-    float RMS_Acel = 4;  // (valor teste)
-    char char_AcelX[17]; // char aceleração eixo X
-    char char_AcelY[17]; // char aceleração eixo Y
-    char char_AcelZ[17]; // char aceleração eixo Z
-    char charRMSAcel[17];
-
-    gpio_set_direction(RESET_PIN, GPIO_MODE_INPUT);  // botao RESET, setado como output
-    gpio_set_direction(PAGINA_PIN, GPIO_MODE_INPUT); // botao PAGINA, setado como output
-
-    SSD1306_t dev;                                                              // address of the SSD1306_t structure
     i2c_master_init(&dev, CONFIG_SDA_GPIO, CONFIG_SCL_GPIO, CONFIG_RESET_GPIO); // iniciar o barramento I2C
     ssd1306_init(&dev, 128, 64);                                                // iniciar o display OLED.  This takes in three parameters. The first is the address of the SSD1306_t structure, the second parameter is the width and the third parameter is the height of the display in pixels.
     ssd1306_clear_screen(&dev, false);                                          // Clear do display.        This takes in two parameters. The first is the address of the SSD1306_t structure and the second parameter is invert which is a bool variable.
     ssd1306_contrast(&dev, 0xff);                                               // Configura o contraste do display OLED
-    ssd1306_display_text_x3(&dev, 0, "Hello", 5, false);                        // Exibe "HELLO" grande por 3 seg
+    ssd1306_display_text_x3(&dev, 3, " IOT", 7, false);                         // Exibe "IOT" grande por 3 seg
+    vTaskDelay(2000 / portTICK_PERIOD_MS);                                      // delay de 3 segundos
+    ssd1306_clear_screen(&dev, false);                                          // Clear do display
+}
 
-    ds18b20_init(TEMP_PIN);                    // iniciar o sensor de Temperatura (GPIO 23)
-    ds18b20_setResolution(tempSensors, 2, 10); // resolução do sensor
-
-    vTaskDelay(2000 / portTICK_PERIOD_MS); // delay de 3 segundos
-    ssd1306_clear_screen(&dev, false);     // Clear do display
-
-    Temperatura[cont] = ds18b20_get_temp();
-    TemperaturaMIN = ds18b20_get_temp();
-    int64_t TEMPO_1 = esp_timer_get_time(); // TEMPO_1 será o valor do timer, que pega o tempo desde o ESP ligar
-
-    xTaskCreate(task_mpu6050, "task_mpu6050", 4096, NULL, 1, NULL);
-    while (1) // O que fica aqui, entra em loop
+// Interrupçoes dos Botoes
+static void IRAM_ATTR gpio_interrupt_reset(void *args)
+{
+    int pinNumber = (int)args;
+    xQueueSendFromISR(interruptQueueRESET, &pinNumber, NULL);
+}
+void Task_BotaoRESET(void *params)
+{
+    int pinNumber;
+    while (true)
     {
-
-        // não usar delaytask para nao parar o codigo todo
-        if ((TEMPO_1 - TEMPO_0) >= 500000) // blink without delay para pegar os valores da temperatura a cada 0.5s, sem parar o codigo
+        if (xQueueReceive(interruptQueueRESET, &pinNumber, portMAX_DELAY))
         {
-            Temperatura[cont] = ds18b20_get_temp();
-            TemperaturaMAX = MAX(Temperatura[cont], TemperaturaMAX); // Temperatura maxima é o valor retornado da função MAX
-            TemperaturaMIN = MIN(Temperatura[cont], TemperaturaMIN); // Temperatura minima é o valor retornado da função MIN
-            sprintf(temperatura, "     %.2f C", Temperatura[cont]);  // printf pa salvar o valor da temperatura no char
-            sprintf(temperaturaMAX, "MAX  %.2f C", TemperaturaMAX);  // printf pa salvar o valor da temperaturaMAX no char
-            sprintf(temperaturaMIN, "MIN  %.2f C", TemperaturaMIN);  // printf pa salvar o valor da temperaturaMIN no char
-            sprintf(charRMS, "RMS  %.2f", calcRMS(Temperatura, cont));
-
-            TEMPO_0 = TEMPO_1;
-            TEMPO_1 = esp_timer_get_time(); // TEMPO_1 será o valor do timer, que pega o tempo desde o ESP ligar
-            cont++;
+            printf("RESET PRESSIONADO %d\n", pinNumber);
+            TemperaturaMAX = -100;
+            TemperaturaMIN = 100;
         }
-
-        if (gpio_get_level(RESET_PIN) == 1) // Se o botao de reset for pressionado, zera os valores de MAX e MIN
-        {
-            TemperaturaMAX = ds18b20_get_temp();
-            TemperaturaMIN = ds18b20_get_temp();
-            printf("RESET PRESSIONADO \n");    // printf teste
-            ssd1306_clear_screen(&dev, false); // Clear do display.
-        }
-        if (gpio_get_level(PAGINA_PIN) == 1) // Se o botao de reset for pressionado, zera os valores de MAX e MIN
-        {
-            printf("PAGE PRESSIONADO \n");     // printf teste
-            ON = !ON;                          // muda estado de ON
-            ssd1306_clear_screen(&dev, false); // Clear do display.
-        }
-
-        sprintf(char_AcelX, "Eixo X  %.2fm/s", AcelX); // printf pa salvar o valor da aceleração do eixo X no char
-        sprintf(char_AcelY, "Eixo Y  %.2fm/s", AcelY); // printf pa salvar o valor da aceleração do eixo Y no char
-        sprintf(char_AcelZ, "Eixo Z  %.2fm/s", AcelZ); // printf pa salvar o valor da aceleração do eixo Z char
-        sprintf(charRMSAcel, "RMS  %.2f", RMS_Acel);
-
-        if (ON == 1) // Se o botao 2 for pressionado, exibe em tela os dados da temperatura
-        {
-            ssd1306_display_text(&dev, 0, "  Temperatura", 16, false); // Exibe no display "Temperatura"
-            ssd1306_display_text(&dev, 1, temperatura, 12, false);     // Exibe no display o valor da temperatura
-            ssd1306_display_text(&dev, 3, charRMS, 10, false);         // Exibe no display "Max Temp"
-            ssd1306_display_text(&dev, 5, temperaturaMAX, 13, false);  // Aqui é reservado pra exibir a temperatura maxima
-            ssd1306_display_text(&dev, 7, temperaturaMIN, 13, false);  // Aqui é reservado pra exibir a temperatura mínima
-        }
-        else // quando ON mudar de estado, exibe os dados da acelerometro
-        {
-            ssd1306_display_text(&dev, 0, "  ACELEROMETRO", 16, false); // Exibe no display "ACELEROMETRO"
-            ssd1306_display_text(&dev, 1, charRMSAcel, 10, false);      // Exibe no display o valor RMS
-            ssd1306_display_text(&dev, 3, char_AcelX, 15, false);       // Exibe no display Aceleração no eixo X
-            ssd1306_display_text(&dev, 5, char_AcelY, 15, false);       // Exibe no display Aceleração no eixo Y
-            ssd1306_display_text(&dev, 7, char_AcelZ, 15, false);       // Exibe no display Aceleração no eixo Z
-        }
-
-        if (cont == 20)
-        {
-            // for (i = 0; i < cont; i++)
-            //{
-            //    Temperatura[i] = 0;
-            //}
-            cont = 1;
-        }
-        /*printf("TEMPO: %lli\n", esp_timer_get_time());
-        printf("cont: %i\n", cont);                                // aqui exibe a temperatura no terminal, só pra testes
-        printf("TemperaturaATUAL: %0.2f C\n", ds18b20_get_temp()); // aqui exibe a temperatura no terminal, só pra testes
-        printf("TemperaturaMAX: %0.2f C\n", TemperaturaMAX);       // aqui exibe a temperatura no terminal, só pra testes
-        printf("TemperaturaMIN: %0.2f C\n", TemperaturaMIN);       // aqui exibe a temperatura no terminal, só pra testes
-        // vTaskDelay(50);                                            // delay de 500ms
-        */
     }
 }
 
-float calcRMS(float *Temperatura, int cont)
+static void IRAM_ATTR gpio_interrupt_pagina(void *args)
 {
-    float rms, soma = 0;
-    int i;
-
-    for (i = 0; i < cont; i++)
+    int pinNumber = (int)args;
+    xQueueSendFromISR(interruptQueuePAGINA, &pinNumber, NULL);
+}
+void Task_BotaoPAGINA(void *params)
+{
+    int pinNumber;
+    while (true)
     {
-        soma = (powf(Temperatura[i], 2)) + soma;
+        if (xQueueReceive(interruptQueuePAGINA, &pinNumber, portMAX_DELAY))
+        {
+            printf("PAGINA PRESSIONADO %d\n", pinNumber);
+            ON = !ON;
+        }
     }
+}
 
-    rms = sqrtf(soma / cont);
+// Interrupção Timer periódico
+void timer_callback(void *param)
+{
+    Temperatura[cont] = ds18b20_get_temp();
+    TemperaturaMAX = MAX(Temperatura[cont], TemperaturaMAX);   // Temperatura maxima é o valor retornado da função MAX
+    TemperaturaMIN = MIN(Temperatura[cont], TemperaturaMIN);   // Temperatura minima é o valor retornado da função MIN
+    sprintf(temperatura, "     %.2f C   ", Temperatura[cont]); // printf pa salvar o valor da temperatura no char
+    sprintf(temperaturaMAX, "MAX  %.2f C   ", TemperaturaMAX); // printf pa salvar o valor da temperaturaMAX no char
+    sprintf(temperaturaMIN, "MIN  %.2f C   ", TemperaturaMIN); // printf pa salvar o valor da temperaturaMIN no char
+    sprintf(charRMS, "RMS  %.2f", calcRMS(Temperatura, cont));
+    cont++;
+    if (cont == 20)
+        cont = 1;
 
-    return rms;
+    if (ON == 1) // Se o botao 2 for pressionado, exibe em tela os dados da temperatura
+    {
+        // ssd1306_clear_screen(&dev, false);
+        ssd1306_display_text(&dev, 0, "  Temperatura", 16, false); // Exibe no display "Temperatura"
+        ssd1306_display_text(&dev, 1, temperatura, 10, false);     // Exibe no display o valor da temperatura
+        ssd1306_display_text(&dev, 3, charRMS, 10, false);         // Exibe no display "Max Temp"
+        ssd1306_display_text(&dev, 5, temperaturaMAX, 13, false);  // Aqui é reservado pra exibir a temperatura maxima
+        ssd1306_display_text(&dev, 7, temperaturaMIN, 13, false);  // Aqui é reservado pra exibir a temperatura mínima
+    }
+}
+
+void app_main(void)
+{
+    i2c_cmd_handle_t cmd;
+    uint8_t data[8];
+    float RMS_Acel = 4; // (valor teste)
+
+    // Configuração Display
+    Display();
+
+    // Configuração Sensor Temperatura
+    DeviceAddress tempSensors[2];
+    ds18b20_init(TEMP_PIN);                    // iniciar o sensor de Temperatura (GPIO 23)
+    ds18b20_setResolution(tempSensors, 2, 10); // resolução do sensor
+    Temperatura[cont] = ds18b20_get_temp();
+    TemperaturaMIN = ds18b20_get_temp();
+
+    // Configuração GPIO e Interrupções
+    gpio_set_direction(RESET_PIN, GPIO_MODE_INPUT);  // botao RESET, setado como input
+    gpio_set_direction(PAGINA_PIN, GPIO_MODE_INPUT); // botao PAGINA, setado como input
+
+    interruptQueueRESET = xQueueCreate(1, sizeof(int));  // Queue Interrupção botao RESET
+    interruptQueuePAGINA = xQueueCreate(1, sizeof(int)); // QueueInterrupção botao PAGINA
+
+    gpio_pulldown_en(RESET_PIN);
+    gpio_pullup_dis(RESET_PIN);
+    gpio_set_intr_type(RESET_PIN, GPIO_INTR_POSEDGE);
+    gpio_pulldown_en(PAGINA_PIN);
+    gpio_pullup_dis(PAGINA_PIN);
+    gpio_set_intr_type(PAGINA_PIN, GPIO_INTR_POSEDGE);
+
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(RESET_PIN, gpio_interrupt_reset, (void *)RESET_PIN);
+    gpio_isr_handler_add(PAGINA_PIN, gpio_interrupt_pagina, (void *)PAGINA_PIN);
+
+    // Criando a interrupção do TIMER
+    const esp_timer_create_args_t my_timer_args = {
+        .callback = &timer_callback};
+    esp_timer_handle_t timer_handler;
+    esp_timer_create(&my_timer_args, &timer_handler);
+    esp_timer_start_periodic(timer_handler, 500000); // Timer a cada 0.5s
+
+    // Tasks (Acontecem de forma simultanea)
+    xTaskCreate(Task_BotaoRESET, "Task BotaoRESET", 2048, NULL, 1, NULL);
+    xTaskCreate(Task_BotaoPAGINA, "Task BotaoPAGINA", 2048, NULL, 1, NULL);
+
+    xTaskCreate(mpu6050_config, "mpu6050_config", 2048, NULL, 1, NULL);
+    // xTaskCreate(task_mpu6050, "task_mpu6050", 4096, NULL, 1, NULL);
+
+    while (1)
+    {
+        // char charRMSAcel[17];
+
+        // Tell the MPU6050 to position the internal register pointer to register
+        // MPU6050_ACCEL_XOUT_H.
+        cmd = i2c_cmd_link_create();
+        i2c_master_start(cmd);
+        i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
+        i2c_master_write_byte(cmd, MPU6050_ACCEL_XOUT_H, 1);
+        i2c_master_stop(cmd);
+        i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_PERIOD_MS);
+        i2c_cmd_link_delete(cmd);
+
+        cmd = i2c_cmd_link_create();
+        i2c_master_start(cmd);
+        i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_READ, 1);
+
+        i2c_master_read_byte(cmd, data, 0);
+        i2c_master_read_byte(cmd, data + 1, 0);
+        i2c_master_read_byte(cmd, data + 2, 0);
+        i2c_master_read_byte(cmd, data + 3, 0);
+        i2c_master_read_byte(cmd, data + 4, 0);
+        i2c_master_read_byte(cmd, data + 5, 1);
+
+        i2c_master_stop(cmd);
+        i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000 / portTICK_PERIOD_MS);
+        i2c_cmd_link_delete(cmd);
+
+        accel_x = (data[0] << 8) | data[1];
+        accel_y = (data[2] << 8) | data[3];
+        accel_z = (data[4] << 8) | data[5];
+        printf("x: %0.3f y: %0.3f  z: %0.3f\n", accel_x / 16384.0, accel_y / 16384.0, accel_z / 16384.0);
+
+        sprintf(char_AcelX, "X  %.3f g", accel_x / 16384.0); // printf pa salvar o valor da aceleração do eixo X no char
+        sprintf(char_AcelY, "Y  %.3f g", accel_y / 16384.0); // printf pa salvar o valor da aceleração do eixo Y no char
+        sprintf(char_AcelZ, "Z  %.3f g", accel_z / 16384.0); // printf pa salvar o valor da aceleração do eixo Z char
+        // sprintf(charRMSAcel, "RMS  %.2f       ", RMS_Acel);
+        if (ON == 0) // quando ON mudar de estado, exibe os dados da acelerometro
+        {
+            ssd1306_display_text(&dev, 0, "  ACELEROMETRO", 16, false); // Exibe no display "ACELEROMETRO"
+            // ssd1306_display_text(&dev, 1, charRMSAcel, 10, false);      // Exibe no display o valor RMS
+            ssd1306_display_text(&dev, 3, char_AcelX, 15, false); // Exibe no display Aceleração no eixo X
+            ssd1306_display_text(&dev, 5, char_AcelY, 15, false); // Exibe no display Aceleração no eixo Y
+            ssd1306_display_text(&dev, 7, char_AcelZ, 15, false); // Exibe no display Aceleração no eixo Z
+        }
+    }
 }
