@@ -1,3 +1,9 @@
+/*Pojeto da Disciplina de IoTI
+EQUIPE: Guilherme Teixeira Martins
+        Igor Alves de Souza
+        Ítalo Vladimir Diniz Vilarim
+*/
+
 #include <stdio.h>
 
 #include "maintask.h"
