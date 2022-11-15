@@ -1,6 +1,28 @@
 #include <stdio.h>
 #include "driver/i2c.h"
 
+#define PIN_SDA 21
+#define PIN_CLK 22
+#define I2C_ADDRESS 0x68 // I2C address of MPU6050
+
+/*
+ * The following registers contain the primary data we are interested in
+ * 0x3B MPU6050_ACCEL_XOUT_H
+ * 0x3C MPU6050_ACCEL_XOUT_L
+ * 0x3D MPU6050_ACCEL_YOUT_H
+ * 0x3E MPU6050_ACCEL_YOUT_L
+ * 0x3F MPU6050_ACCEL_ZOUT_H
+ * 0x50 MPU6050_ACCEL_ZOUT_L
+ * 0x41 MPU6050_TEMP_OUT_H
+ * 0x42 MPU6050_TEMP_OUT_L
+ * 0x43 MPU6050_GYRO_XOUT_H
+ * 0x44 MPU6050_GYRO_XOUT_L
+ * 0x45 MPU6050_GYRO_YOUT_H
+ * 0x46 MPU6050_GYRO_YOUT_L
+ * 0x47 MPU6050_GYRO_ZOUT_H
+ * 0x48 MPU6050_GYRO_ZOUT_L
+ */
+
 #define MPU6050_I2C_ADDRESS 0x68
 #define MPU6050_PWR_MGMT_1 0x6B
 #define MPU6050_ACCEL_CONFIG 0x1C
@@ -11,14 +33,15 @@
 #define MPU6050_ACCEL_FULL_SCALE_8G 0x10
 #define MPU6050_ACCEL_FULL_SCALE_16G 0x18
 
-#define MPU6050_ACCEL_LSB_SENS_2G 16384
+#define MPU6050_ACCEL_LSB_SENS_2G 16384 // Escala utilizada
 #define MPU6050_ACCEL_LSB_SENS_4G 8192
 #define MPU6050_ACCEL_LSB_SENS_8G 4096
 #define MPU6050_ACCEL_LSB_SENS_16G 2048
 
 #define MPU6050_I2C_MASTER_FREQ_HZ 400000
 
+// Configura o MPU6050
+void mpu6050_config(void *ignore);
+
+// Função que faz a aquisição dos dados
 void task_mpu6050(void *ignore);
-/**
- * @brief Lê dados do acelerômetro;
- */
