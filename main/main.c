@@ -21,8 +21,8 @@ void Display(void) // Função que inicia o Display
     ssd1306_init(&dev, 128, 64);                                                // iniciar o display OLED.  This takes in three parameters. The first is the address of the SSD1306_t structure, the second parameter is the width and the third parameter is the height of the display in pixels.
     ssd1306_clear_screen(&dev, false);                                          // Clear do display.        This takes in two parameters. The first is the address of the SSD1306_t structure and the second parameter is invert which is a bool variable.
     ssd1306_contrast(&dev, 0xff);                                               // Configura o contraste do display OLED
-    ssd1306_display_text_x3(&dev, 3, " IOT", 7, false);                         // Exibe "IOT" grande por 3 seg
-    vTaskDelay(2000 / portTICK_PERIOD_MS);                                      // delay de 3 segundos
+    ssd1306_display_text_x3(&dev, 3, " IOT", 4, false);                         // Exibe "IOT" grande por 3 seg
+    vTaskDelay(2000 / portTICK_PERIOD_MS);                                      // delay de 2 segundos
     ssd1306_clear_screen(&dev, false);                                          // Clear do display
 }
 
