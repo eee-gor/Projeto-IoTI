@@ -10,9 +10,9 @@
 #include "ds18b20.h"
 #include "ssd1306.h"
 
-#define SLEEP_PIN 5   // botao de mudar pagina está no GPI 18
-#define PAGINA_PIN 18 // botao de mudar pagina está no GPI 18
-#define RESET_PIN 4   // botao de reset está no GPI 19
+#define RESET_PIN 4   // botao de reset está no GPIO 4
+#define SLEEP_PIN 5   // botao Deep Sleep MODE está no GPIO 5 
+#define PAGINA_PIN 18 // botao de mudar pagina está no GPIO 18
 #define TEMP_PIN 23   // Sensor de temperatua está no GPIO 23
 
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y)) // função calulo Valor MAXIMO
