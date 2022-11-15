@@ -9,12 +9,6 @@ char temperatura[16];    // char temperatura (o display so le char)
 char temperaturaMAX[16]; // char da temperatura MAX
 char temperaturaMIN[16]; // char da temperatura MIN
 char charRMS[16];
-short accel_x;
-short accel_y;
-short accel_z;
-char char_AcelX[17]; // char aceleração eixo X
-char char_AcelY[17]; // char aceleração eixo Y
-char char_AcelZ[17]; // char aceleração eixo Z
 
 int cont = 0; // contador
 
@@ -102,7 +96,14 @@ void app_main(void)
 {
     i2c_cmd_handle_t cmd;
     uint8_t data[8];
-    float RMS_Acel = 4; // (valor teste)
+
+    short accel_x;
+    short accel_y;
+    short accel_z;
+    char char_accel_x[12]; // char aceleração eixo X
+    char char_accel_y[12]; // char aceleração eixo Y
+    char char_accel_z[12]; // char aceleração eixo Z
+    float RMS_Acel = 4;    // (valor teste)
 
     // Configuração Display
     Display();
@@ -180,17 +181,16 @@ void app_main(void)
         accel_z = (data[4] << 8) | data[5];
         printf("x: %0.3f y: %0.3f  z: %0.3f\n", accel_x / 16384.0, accel_y / 16384.0, accel_z / 16384.0);
 
-        sprintf(char_AcelX, "X  %.3f g", accel_x / 16384.0); // printf pa salvar o valor da aceleração do eixo X no char
-        sprintf(char_AcelY, "Y  %.3f g", accel_y / 16384.0); // printf pa salvar o valor da aceleração do eixo Y no char
-        sprintf(char_AcelZ, "Z  %.3f g", accel_z / 16384.0); // printf pa salvar o valor da aceleração do eixo Z char
+        sprintf(char_accel_x, "X  %.3f g", accel_x / 16384.0); // printf pa salvar o valor da aceleração do eixo X no char
+        sprintf(char_accel_y, "Y  %.3f g", accel_y / 16384.0); // printf pa salvar o valor da aceleração do eixo Y no char
+        sprintf(char_accel_z, "Z  %.3f g", accel_z / 16384.0); // printf pa salvar o valor da aceleração do eixo Z char
         // sprintf(charRMSAcel, "RMS  %.2f       ", RMS_Acel);
         if (ON == 0) // quando ON mudar de estado, exibe os dados da acelerometro
         {
             ssd1306_display_text(&dev, 0, "  ACELEROMETRO", 16, false); // Exibe no display "ACELEROMETRO"
-            // ssd1306_display_text(&dev, 1, charRMSAcel, 10, false);      // Exibe no display o valor RMS
-            ssd1306_display_text(&dev, 3, char_AcelX, 15, false); // Exibe no display Aceleração no eixo X
-            ssd1306_display_text(&dev, 5, char_AcelY, 15, false); // Exibe no display Aceleração no eixo Y
-            ssd1306_display_text(&dev, 7, char_AcelZ, 15, false); // Exibe no display Aceleração no eixo Z
+            ssd1306_display_text(&dev, 3, char_accel_x, 12, false);     // Exibe no display Aceleração no eixo X
+            ssd1306_display_text(&dev, 5, char_accel_y, 12, false);     // Exibe no display Aceleração no eixo Y
+            ssd1306_display_text(&dev, 7, char_accel_z, 12, false);     // Exibe no display Aceleração no eixo Z
         }
     }
 }
