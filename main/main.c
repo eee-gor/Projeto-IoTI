@@ -13,11 +13,8 @@ char charRMS[16];
 int cont = 0; // contador
 
 static bool ON = 1; // variavel que muda de estado quando botao PAGE é pressionado
-SSD1306_t dev;      // address of the SSD1306_t structure
 
-xQueueHandle interruptQueueRESET;
-xQueueHandle interruptQueuePAGINA;
-
+SSD1306_t dev;     // address of the SSD1306_t structure
 void Display(void) // Função que inicia o Display
 {
     i2c_master_init(&dev, CONFIG_SDA_GPIO, CONFIG_SCL_GPIO, CONFIG_RESET_GPIO); // iniciar o barramento I2C
@@ -30,7 +27,11 @@ void Display(void) // Função que inicia o Display
 }
 
 // Interrupçoes dos Botoes
-static void IRAM_ATTR gpio_interrupt_reset(void *args)
+xQueueHandle interruptQueueRESET;
+xQueueHandle interruptQueuePAGINA;
+xQueueHandle interruptQueueSLEEP;
+
+static void IRAM_ATTR gpio_interrupt_reset(void *args) // Botão de RESET parametros MAX e MIN
 {
     int pinNumber = (int)args;
     xQueueSendFromISR(interruptQueueRESET, &pinNumber, NULL);
@@ -49,7 +50,7 @@ void Task_BotaoRESET(void *params)
     }
 }
 
-static void IRAM_ATTR gpio_interrupt_pagina(void *args)
+static void IRAM_ATTR gpio_interrupt_pagina(void *args) // Botão de mudar pagina
 {
     int pinNumber = (int)args;
     xQueueSendFromISR(interruptQueuePAGINA, &pinNumber, NULL);
@@ -67,6 +68,23 @@ void Task_BotaoPAGINA(void *params)
     }
 }
 
+static void IRAM_ATTR gpio_interrupt_sleep(void *args) // Botão de ativar DEEP SLEEP MODE
+{
+    int pinNumber = (int)args;
+    xQueueSendFromISR(interruptQueueSLEEP, &pinNumber, NULL);
+}
+void Task_BotaoSLEEP(void *params)
+{
+    int pinNumber;
+    while (true)
+    {
+        if (xQueueReceive(interruptQueueSLEEP, &pinNumber, portMAX_DELAY))
+        {
+            esp_deep_sleep_start();
+        }
+    }
+}
+
 // Interrupção Timer periódico
 void timer_callback(void *param)
 {
@@ -78,12 +96,11 @@ void timer_callback(void *param)
     sprintf(temperaturaMIN, "MIN  %.2f C   ", TemperaturaMIN); // printf pa salvar o valor da temperaturaMIN no char
     sprintf(charRMS, "RMS  %.2f", calcRMS(Temperatura, cont));
     cont++;
-    if (cont == 20)
+    if (cont == 100)
         cont = 1;
 
     if (ON == 1) // Se o botao 2 for pressionado, exibe em tela os dados da temperatura
     {
-        // ssd1306_clear_screen(&dev, false);
         ssd1306_display_text(&dev, 0, "  Temperatura", 16, false); // Exibe no display "Temperatura"
         ssd1306_display_text(&dev, 1, temperatura, 10, false);     // Exibe no display o valor da temperatura
         ssd1306_display_text(&dev, 3, charRMS, 10, false);         // Exibe no display "Max Temp"
@@ -94,6 +111,59 @@ void timer_callback(void *param)
 
 void app_main(void)
 {
+    //  Configuração Display
+    Display();
+
+    //  Configuração Sensor Temperatura
+    DeviceAddress tempSensors[2];
+    ds18b20_init(TEMP_PIN);                    // iniciar o sensor de Temperatura (GPIO 23)
+    ds18b20_setResolution(tempSensors, 2, 10); // resolução do sensor
+    Temperatura[cont] = ds18b20_get_temp();
+    TemperaturaMIN = ds18b20_get_temp();
+
+    // Configuração GPIO e Interrupções
+    gpio_set_direction(RESET_PIN, GPIO_MODE_INPUT);   // botao RESET, setado como input
+    gpio_set_direction(PAGINA_PIN, GPIO_MODE_INPUT);  // botao PAGINA, setado como input
+    gpio_set_direction(SLEEP_PIN, GPIO_MODE_INPUT);   // botao SLEEP, setado como input
+    gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT); // GPIO_NUM_2, setado como output (LED)
+    gpio_set_level(GPIO_NUM_2, 1);                    // LED azul serve como LED de energização
+
+    esp_sleep_enable_ext0_wakeup(RESET_PIN, 1); // WAKEUP do ESP (Botão de RESET inicia novamente)
+
+    interruptQueueRESET = xQueueCreate(1, sizeof(int));  // Queue Interrupção botao RESET
+    interruptQueuePAGINA = xQueueCreate(1, sizeof(int)); // QueueInterrupção botao PAGINA
+    interruptQueueSLEEP = xQueueCreate(1, sizeof(int));  // QueueInterrupção botao SLEEP MODE
+
+    gpio_pulldown_en(RESET_PIN);                      // Habilita resistor PULLDOWN
+    gpio_set_intr_type(RESET_PIN, GPIO_INTR_POSEDGE); // Ativa interrupção em rising edge
+
+    gpio_pulldown_en(PAGINA_PIN);                      // Habilita resistor PULLDOWN
+    gpio_set_intr_type(PAGINA_PIN, GPIO_INTR_POSEDGE); // Ativa interrupção em rising edge
+
+    gpio_pulldown_en(SLEEP_PIN);                      // Habilita resistor PULLDOWN
+    gpio_set_intr_type(SLEEP_PIN, GPIO_INTR_POSEDGE); // Ativa interrupção em rising edge
+
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(RESET_PIN, gpio_interrupt_reset, (void *)RESET_PIN);
+    gpio_isr_handler_add(PAGINA_PIN, gpio_interrupt_pagina, (void *)PAGINA_PIN);
+    gpio_isr_handler_add(SLEEP_PIN, gpio_interrupt_sleep, (void *)SLEEP_PIN);
+
+    // Criando a interrupção do TIMER
+    const esp_timer_create_args_t my_timer_args = {
+        .callback = &timer_callback};
+    esp_timer_handle_t timer_handler;
+    esp_timer_create(&my_timer_args, &timer_handler);
+    esp_timer_start_periodic(timer_handler, 500000); // Timer a cada 0.5s
+
+    // Tasks (Acontecem de forma simultanea)
+    xTaskCreate(Task_BotaoRESET, "Task BotaoRESET", 1024, NULL, 1, NULL);
+    xTaskCreate(Task_BotaoPAGINA, "Task BotaoPAGINA", 1024, NULL, 1, NULL);
+    xTaskCreate(Task_BotaoSLEEP, "Task BotaoPAGINA", 1024, NULL, 1, NULL);
+
+    xTaskCreate(mpu6050_config, "mpu6050_config", 2048, NULL, 1, NULL);
+    // xTaskCreate(task_mpu6050, "task_mpu6050", 4096, NULL, 1, NULL);
+
+    // Dados do acelerometro
     i2c_cmd_handle_t cmd;
     uint8_t data[8];
 
@@ -104,53 +174,9 @@ void app_main(void)
     char char_accel_y[12]; // char aceleração eixo Y
     char char_accel_z[12]; // char aceleração eixo Z
     float RMS_Acel = 4;    // (valor teste)
-
-    // Configuração Display
-    Display();
-
-    // Configuração Sensor Temperatura
-    DeviceAddress tempSensors[2];
-    ds18b20_init(TEMP_PIN);                    // iniciar o sensor de Temperatura (GPIO 23)
-    ds18b20_setResolution(tempSensors, 2, 10); // resolução do sensor
-    Temperatura[cont] = ds18b20_get_temp();
-    TemperaturaMIN = ds18b20_get_temp();
-
-    // Configuração GPIO e Interrupções
-    gpio_set_direction(RESET_PIN, GPIO_MODE_INPUT);  // botao RESET, setado como input
-    gpio_set_direction(PAGINA_PIN, GPIO_MODE_INPUT); // botao PAGINA, setado como input
-
-    interruptQueueRESET = xQueueCreate(1, sizeof(int));  // Queue Interrupção botao RESET
-    interruptQueuePAGINA = xQueueCreate(1, sizeof(int)); // QueueInterrupção botao PAGINA
-
-    gpio_pulldown_en(RESET_PIN);
-    gpio_pullup_dis(RESET_PIN);
-    gpio_set_intr_type(RESET_PIN, GPIO_INTR_POSEDGE);
-    gpio_pulldown_en(PAGINA_PIN);
-    gpio_pullup_dis(PAGINA_PIN);
-    gpio_set_intr_type(PAGINA_PIN, GPIO_INTR_POSEDGE);
-
-    gpio_install_isr_service(0);
-    gpio_isr_handler_add(RESET_PIN, gpio_interrupt_reset, (void *)RESET_PIN);
-    gpio_isr_handler_add(PAGINA_PIN, gpio_interrupt_pagina, (void *)PAGINA_PIN);
-
-    // Criando a interrupção do TIMER
-    const esp_timer_create_args_t my_timer_args = {
-        .callback = &timer_callback};
-    esp_timer_handle_t timer_handler;
-    esp_timer_create(&my_timer_args, &timer_handler);
-    esp_timer_start_periodic(timer_handler, 500000); // Timer a cada 0.5s
-
-    // Tasks (Acontecem de forma simultanea)
-    xTaskCreate(Task_BotaoRESET, "Task BotaoRESET", 2048, NULL, 1, NULL);
-    xTaskCreate(Task_BotaoPAGINA, "Task BotaoPAGINA", 2048, NULL, 1, NULL);
-
-    xTaskCreate(mpu6050_config, "mpu6050_config", 2048, NULL, 1, NULL);
-    // xTaskCreate(task_mpu6050, "task_mpu6050", 4096, NULL, 1, NULL);
-
+    // char charRMSAcel[17];
     while (1)
     {
-        // char charRMSAcel[17];
-
         // Tell the MPU6050 to position the internal register pointer to register
         // MPU6050_ACCEL_XOUT_H.
         cmd = i2c_cmd_link_create();
@@ -181,9 +207,9 @@ void app_main(void)
         accel_z = (data[4] << 8) | data[5];
         printf("x: %0.3f y: %0.3f  z: %0.3f\n", accel_x / 16384.0, accel_y / 16384.0, accel_z / 16384.0);
 
-        sprintf(char_accel_x, "X  %.3f g", accel_x / 16384.0); // printf pa salvar o valor da aceleração do eixo X no char
-        sprintf(char_accel_y, "Y  %.3f g", accel_y / 16384.0); // printf pa salvar o valor da aceleração do eixo Y no char
-        sprintf(char_accel_z, "Z  %.3f g", accel_z / 16384.0); // printf pa salvar o valor da aceleração do eixo Z char
+        sprintf(char_accel_x, "X  %.3f g ", (accel_x / 16384.0)); // printf pa salvar o valor da aceleração do eixo X no char
+        sprintf(char_accel_y, "Y  %.3f g ", (accel_y / 16384.0)); // printf pa salvar o valor da aceleração do eixo Y no char
+        sprintf(char_accel_z, "Z  %.3f g ", (accel_z / 16384.0)); // printf pa salvar o valor da aceleração do eixo Z char
         // sprintf(charRMSAcel, "RMS  %.2f       ", RMS_Acel);
         if (ON == 0) // quando ON mudar de estado, exibe os dados da acelerometro
         {
