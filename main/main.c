@@ -80,6 +80,14 @@ void Task_BotaoSLEEP(void *params)
     {
         if (xQueueReceive(interruptQueueSLEEP, &pinNumber, portMAX_DELAY))
         {
+            ssd1306_clear_line(&dev, 0, false);
+            ssd1306_clear_line(&dev, 1, false);
+            ssd1306_clear_line(&dev, 2, false);
+            ssd1306_clear_line(&dev, 3, false);
+            ssd1306_clear_line(&dev, 4, false);
+            ssd1306_clear_line(&dev, 5, false);
+            ssd1306_clear_line(&dev, 6, false);
+            ssd1306_clear_line(&dev, 7, false);
             esp_deep_sleep_start();
         }
     }
@@ -96,7 +104,7 @@ void timer_callback(void *param)
     sprintf(temperaturaMIN, "MIN  %.2f C   ", TemperaturaMIN); // printf pa salvar o valor da temperaturaMIN no char
     sprintf(charRMS, "RMS  %.2f", calcRMS(Temperatura, cont));
     cont++;
-    if (cont == 100)
+    if (cont == 20)
         cont = 1;
 
     if (ON == 1) // Se o botao 2 for pressionado, exibe em tela os dados da temperatura
@@ -156,9 +164,9 @@ void app_main(void)
     esp_timer_start_periodic(timer_handler, 500000); // Timer a cada 0.5s
 
     // Tasks (Acontecem de forma simultanea)
-    xTaskCreate(Task_BotaoRESET, "Task BotaoRESET", 1024, NULL, 1, NULL);
-    xTaskCreate(Task_BotaoPAGINA, "Task BotaoPAGINA", 1024, NULL, 1, NULL);
-    xTaskCreate(Task_BotaoSLEEP, "Task BotaoPAGINA", 1024, NULL, 1, NULL);
+    xTaskCreate(Task_BotaoRESET, "Task BotaoRESET", 2048, NULL, 1, NULL);
+    xTaskCreate(Task_BotaoPAGINA, "Task BotaoPAGINA", 2048, NULL, 1, NULL);
+    xTaskCreate(Task_BotaoSLEEP, "Task BotaoPAGINA", 2048, NULL, 1, NULL);
 
     xTaskCreate(mpu6050_config, "mpu6050_config", 2048, NULL, 1, NULL);
     // xTaskCreate(task_mpu6050, "task_mpu6050", 4096, NULL, 1, NULL);
