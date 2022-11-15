@@ -3,9 +3,9 @@ Pojeto da Disciplina de IoTI - Sprint 2 – Subsistema de aquisição de dados (
 Subsistema de aquisição de vibração e temperatura para estimar a condição de operação de uma máquina girante, utilizando um ESP32.
 
 
-EQUIPE: Guilherme Teixeira Martins
-        Igor Alves de Souza
-        Ítalo Vladimir Diniz Vilarim
+EQUIPE: Guilherme Teixeira Martins.
+        Igor Alves de Souza.
+        Ítalo Vladimir Diniz Vilarim.
 
 
 
