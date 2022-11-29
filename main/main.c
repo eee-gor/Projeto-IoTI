@@ -1,6 +1,111 @@
 #include <stdio.h>
+#include "mqtt_client.h"
+#include "nvs_flash.h"
+#include "esp_wifi.h"
+#include "esp_system.h"
+
+#include "lwip/sockets.h"
+#include "lwip/dns.h"
+#include "lwip/netdb.h"
 
 #include "maintask.h"
+
+static const char *TAG = "MQTT_EXAMPLE";
+#define ESP_WIFI_SSID "connect-izaias" // Nome do WIFI
+#define ESP_WIFI_PASS "244466666"      // Senha do WIFI
+uint32_t MQTT_CONNECTED = 0;           // 0 quando MQTT nao conectar, 1 quando sim
+
+// eventos do WIFI
+static esp_err_t wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    switch (event_id)
+    {
+    case WIFI_EVENT_STA_START:
+        esp_wifi_connect();
+        ESP_LOGI(TAG, "Trying to connect with Wi-Fi\n");
+        break;
+
+    case WIFI_EVENT_STA_CONNECTED:
+        ESP_LOGI(TAG, "Wi-Fi connected\n");
+        break;
+
+    case IP_EVENT_STA_GOT_IP:
+        ESP_LOGI(TAG, "got ip: startibg MQTT Client\n");
+        mqtt_app_start();
+        break;
+
+    case WIFI_EVENT_STA_DISCONNECTED:
+        ESP_LOGI(TAG, "disconnected: Retrying Wi-Fi\n");
+        esp_wifi_connect();
+
+        break;
+
+    default:
+        break;
+    }
+    return ESP_OK;
+}
+// Inicia WIFI, chamada na main
+void wifi_init(void)
+{
+    esp_event_loop_create_default();
+    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL);
+    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL);
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = ESP_WIFI_SSID,
+            .password = ESP_WIFI_PASS,
+            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
+        },
+    };
+    esp_netif_init();
+    esp_netif_create_default_wifi_sta();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
+    esp_wifi_start();
+}
+// eventos do MQTT
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    // ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%d", base, event_id);
+    // esp_mqtt_event_handle_t event = event_data;
+
+    switch ((esp_mqtt_event_id_t)event_id)
+    {
+    case MQTT_EVENT_CONNECTED:
+        // ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        MQTT_CONNECTED = 1;
+        break;
+
+    case MQTT_EVENT_DISCONNECTED:
+        // ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        MQTT_CONNECTED = 0;
+        break;
+
+    // case MQTT_EVENT_ERROR:
+    //  ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
+    // break;
+    default:
+        // ESP_LOGI(TAG, "Other event id:%d", event->event_id);
+        break;
+    }
+}
+// Inicia MQTT
+esp_mqtt_client_handle_t client = NULL;
+static void mqtt_app_start(void)
+{
+    ESP_LOGI(TAG, "STARTING MQTT");
+    // parâmetros de conexão do broker
+    esp_mqtt_client_config_t mqttConfig = {
+        .uri = "mqtt://broker.emqx.io:1883"};
+
+    client = esp_mqtt_client_init(&mqttConfig);
+    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, client);
+    esp_mqtt_client_start(client);
+}
 
 float Temperatura[100];  // Temperatura é o valor da temperatura obtido no sensor
 float TemperaturaMAX;    // TemperaturaMAX é o valor máximo da temperatura obtido no sensor
@@ -10,7 +115,7 @@ char temperaturaMAX[16]; // char da temperatura MAX
 char temperaturaMIN[16]; // char da temperatura MIN
 char charRMS[16];
 
-int cont = 0; // contador
+int cont = 1; // contador
 
 static bool ON = 1; // variavel que muda de estado quando botao PAGE é pressionado
 
@@ -78,7 +183,7 @@ void Task_BotaoSLEEP(void *params)
     int pinNumber;
     while (true)
     {
-        if (xQueueReceive(interruptQueueSLEEP, &pinNumber, portMAX_DELAY))
+        if (xQueueReceive(interruptQueueSLEEP, &pinNumber, portMAX_DELAY)) // Limpa todas as linhas do Display e ativa Deep Sleep Mode
         {
             ssd1306_clear_line(&dev, 0, false);
             ssd1306_clear_line(&dev, 1, false);
@@ -104,9 +209,6 @@ void timer_callback(void *param)
     sprintf(temperaturaMIN, "MIN  %.2f C   ", TemperaturaMIN); // printf pa salvar o valor da temperaturaMIN no char
     sprintf(charRMS, "RMS  %.2f", calcRMS(Temperatura, cont));
     cont++;
-    if (cont == 20)
-        cont = 1;
-
     if (ON == 1) // Se o botao 2 for pressionado, exibe em tela os dados da temperatura
     {
         ssd1306_display_text(&dev, 0, "  Temperatura", 16, false); // Exibe no display "Temperatura"
@@ -114,6 +216,22 @@ void timer_callback(void *param)
         ssd1306_display_text(&dev, 3, charRMS, 10, false);         // Exibe no display "Max Temp"
         ssd1306_display_text(&dev, 5, temperaturaMAX, 13, false);  // Aqui é reservado pra exibir a temperatura maxima
         ssd1306_display_text(&dev, 7, temperaturaMIN, 13, false);  // Aqui é reservado pra exibir a temperatura mínima
+    }
+    if (cont == 100)
+        cont = 1;
+}
+
+// Função Publisher do MQTT
+void Publisher_Task(void *params)
+{
+    while (1)
+    {
+        vTaskDelay(10000 / portTICK_PERIOD_MS); // 10 seg
+        if (MQTT_CONNECTED)
+        {
+            esp_mqtt_client_publish(client, "grupo10/temperatura", charRMS, 0, 0, 0);     // publica RMS temperatura no topico grupoX/temperatura
+            esp_mqtt_client_publish(client, "grupo10/rmsvibracao", temperatura, 0, 0, 0); // publica RMS vibracao no topico grupoX/rmsvibracao
+        }
     }
 }
 
@@ -142,10 +260,12 @@ void app_main(void)
     interruptQueuePAGINA = xQueueCreate(1, sizeof(int)); // QueueInterrupção botao PAGINA
     interruptQueueSLEEP = xQueueCreate(1, sizeof(int));  // QueueInterrupção botao SLEEP MODE
 
-    gpio_pulldown_en(RESET_PIN);                      // Habilita resistor PULLDOWN
+    gpio_pulldown_en(RESET_PIN); // Habilita resistor PULLDOWN
+    gpio_pullup_dis(RESET_PIN);
     gpio_set_intr_type(RESET_PIN, GPIO_INTR_POSEDGE); // Ativa interrupção em rising edge
 
-    gpio_pulldown_en(PAGINA_PIN);                      // Habilita resistor PULLDOWN
+    gpio_pulldown_en(PAGINA_PIN); // Habilita resistor PULLDOWN
+    gpio_pullup_dis(PAGINA_PIN);
     gpio_set_intr_type(PAGINA_PIN, GPIO_INTR_POSEDGE); // Ativa interrupção em rising edge
 
     gpio_pulldown_en(SLEEP_PIN);                      // Habilita resistor PULLDOWN
@@ -163,11 +283,16 @@ void app_main(void)
     esp_timer_create(&my_timer_args, &timer_handler);
     esp_timer_start_periodic(timer_handler, 500000); // Timer a cada 0.5s
 
+    nvs_flash_init();
+    wifi_init(); // Inicia WIFI
+
     // Tasks (Acontecem de forma simultanea)
     xTaskCreate(Task_BotaoRESET, "Task BotaoRESET", 2048, NULL, 1, NULL);
     xTaskCreate(Task_BotaoPAGINA, "Task BotaoPAGINA", 2048, NULL, 1, NULL);
     xTaskCreate(Task_BotaoSLEEP, "Task BotaoPAGINA", 2048, NULL, 1, NULL);
 
+    // xTaskCreatePinnedToCore(Publisher_Task, "Publisher_Task", 2048 * 5, NULL, 0, NULL, 1);
+    xTaskCreate(Publisher_Task, "Publisher_Task", 2048 * 5, NULL, 2, NULL);
     xTaskCreate(mpu6050_config, "mpu6050_config", 2048, NULL, 1, NULL);
     // xTaskCreate(task_mpu6050, "task_mpu6050", 4096, NULL, 1, NULL);
 
@@ -181,8 +306,9 @@ void app_main(void)
     char char_accel_x[12]; // char aceleração eixo X
     char char_accel_y[12]; // char aceleração eixo Y
     char char_accel_z[12]; // char aceleração eixo Z
-    float RMS_Acel = 4;    // (valor teste)
-    // char charRMSAcel[17];
+    // char charRMSAcelX[17];
+    // char charRMSAcelY[17];
+    // char charRMSAcelZ[17];
     while (1)
     {
         // Tell the MPU6050 to position the internal register pointer to register
@@ -213,7 +339,7 @@ void app_main(void)
         accel_x = (data[0] << 8) | data[1];
         accel_y = (data[2] << 8) | data[3];
         accel_z = (data[4] << 8) | data[5];
-        printf("x: %0.3f y: %0.3f  z: %0.3f\n", accel_x / 16384.0, accel_y / 16384.0, accel_z / 16384.0);
+        // printf("x: %0.3f y: %0.3f  z: %0.3f\n", accel_x / 16384.0, accel_y / 16384.0, accel_z / 16384.0);
 
         sprintf(char_accel_x, "X  %.3f g ", (accel_x / 16384.0)); // printf pa salvar o valor da aceleração do eixo X no char
         sprintf(char_accel_y, "Y  %.3f g ", (accel_y / 16384.0)); // printf pa salvar o valor da aceleração do eixo Y no char
