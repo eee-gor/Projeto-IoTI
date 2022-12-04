@@ -428,10 +428,10 @@ void app_main(void)
     //  Tasks (Acontecem de forma simultanea)
     xTaskCreate(Task_BotaoRESET, "Task RESET", 2048, NULL, 5, NULL);
     xTaskCreate(Task_BotaoPAGINA, "Task PAGINA", 2048, NULL, 5, NULL);
-    xTaskCreate(Task_BotaoSLEEP, "Task PAGINA", 2048, NULL, 5, NULL);
+    xTaskCreate(Task_BotaoSLEEP, "Task SLEEP", 2048, NULL, 5, NULL);
     xTaskCreate(mpu6050_config, "mpu6050_config", 2048, NULL, 5, NULL);
     xTaskCreate(Task_acel, "Task_acel", 10240, NULL, 25, NULL);
     xTaskCreate(Task_Temperatura, "Task_Temperatura", 2048, NULL, 25, NULL);
     xTaskCreate(Task_DISPLAY, "Task DISPLAY", 10240, NULL, 25, NULL);
-    xTaskCreate(Task_PAGINA, "Task PAGINA2", 2048, NULL, 23, NULL);
+    xTaskCreate(Task_PAGINA, "Task PAGINA2", 4096, NULL, 23, NULL);
 }
